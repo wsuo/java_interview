@@ -42,7 +42,7 @@
 ### 方式二：本地部署
 ```bash
 # 克隆仓库
-git clone https://github.com/wshuo/java_interview.git
+git clone https://github.com/wsuo/java_interview.git
 
 # 进入目录
 cd java_interview
@@ -121,7 +121,7 @@ docsify serve .
 
 - 📧 邮箱：通过GitHub Issues联系
 - 💬 讨论：GitHub Discussions
-- 🔗 项目地址：[GitHub仓库](https://github.com/wshuo/java_interview)
+- 🔗 项目地址：[GitHub仓库](https://github.com/wsuo/java_interview)
 
 ## 📄 许可证
 

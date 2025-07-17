@@ -14,5 +14,5 @@
   * [💻 练习平台](https://leetcode.cn/)
 
 * 🔗 链接
-  * [GitHub仓库](https://github.com/wshuo/java_interview)
-  * [问题反馈](https://github.com/wshuo/java_interview/issues)
+  * [GitHub仓库](https://github.com/wsuo/java_interview)
+  * [问题反馈](https://github.com/wsuo/java_interview/issues)

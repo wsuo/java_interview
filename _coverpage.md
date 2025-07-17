@@ -1,6 +1,6 @@
 <!-- _coverpage.md -->
 
-![logo](_media/logo.png)
+![logo](_media/logo.svg)
 
 # Java面试知识库 {docsify-ignore}
 
@@ -16,7 +16,7 @@
 
 [🚀 开始学习](README.md)
 [📋 知识库总结](面试知识库总结.md)
-[💻 GitHub仓库](https://github.com/wshuo/java_interview)
+[💻 GitHub仓库](https://github.com/wsuo/java_interview)
 
 <!-- 背景色 -->
 ![color](#f0f0f0)

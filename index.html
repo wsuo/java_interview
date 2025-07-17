@@ -45,7 +45,7 @@
   <script>
     window.$docsify = {
       name: 'Java面试知识库',
-      repo: 'https://github.com/wshuo/java_interview',
+      repo: 'https://github.com/wsuo/java_interview',
       loadSidebar: true,
       loadNavbar: true,
       subMaxLevel: 3,
@@ -84,7 +84,7 @@
       plugins: [
         function(hook, vm) {
           hook.beforeEach(function (html) {
-            var url = 'https://github.com/wshuo/java_interview/blob/main/' + vm.route.file;
+            var url = 'https://github.com/wsuo/java_interview/blob/main/' + vm.route.file;
             var editHtml = '📝 [编辑此页](' + url + ')\n\n';
             return editHtml + html;
           });
