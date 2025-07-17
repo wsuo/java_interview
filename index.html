@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>Java面试知识库</title>
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+  <meta name="description" content="Java面试知识库 - 全面的Java技术面试准备资料">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0">
+  <link rel="stylesheet" href="//cdn.jsdelivr.net/npm/docsify@4/lib/themes/vue.css">
+  <style>
+    .sidebar {
+      padding-top: 6px;
+    }
+    .sidebar > h1 {
+      margin: 0 auto 1rem;
+      font-size: 1.5rem;
+      font-weight: 300;
+      text-align: center;
+    }
+    .sidebar > h1 a {
+      color: inherit;
+      text-decoration: none;
+    }
+    .sidebar > h1 .app-name-link {
+      color: var(--theme-color, #42b983);
+    }
+    .markdown-section {
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 30px 15px 40px;
+    }
+    /* 移动端优化 */
+    @media screen and (max-width: 768px) {
+      .markdown-section {
+        padding: 20px 10px 30px;
+      }
+      .sidebar {
+        width: 280px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">加载中...</div>
+  <script>
+    window.$docsify = {
+      name: 'Java面试知识库',
+      repo: 'https://github.com/wshuo/java_interview',
+      loadSidebar: true,
+      loadNavbar: true,
+      subMaxLevel: 3,
+      auto2top: true,
+      search: {
+        placeholder: '🔍 搜索面试题',
+        noData: '😞 没有找到相关内容',
+        depth: 6
+      },
+      copyCode: {
+        buttonText: '复制代码',
+        errorText: '复制失败',
+        successText: '复制成功'
+      },
+      count: {
+        countable: true,
+        position: 'top',
+        margin: '10px',
+        float: 'right',
+        fontsize: '0.9em',
+        color: 'rgb(90,90,90)',
+        language: 'chinese'
+      },
+      pagination: {
+        previousText: '上一页',
+        nextText: '下一页',
+        crossChapter: true,
+        crossChapterText: true,
+      },
+      themeColor: '#42b983',
+      logo: '/_media/logo.png',
+      coverpage: true,
+      onlyCover: false,
+      mergeNavbar: true,
+      formatUpdated: '{MM}/{DD} {HH}:{mm}',
+      plugins: [
+        function(hook, vm) {
+          hook.beforeEach(function (html) {
+            var url = 'https://github.com/wshuo/java_interview/blob/main/' + vm.route.file;
+            var editHtml = '📝 [编辑此页](' + url + ')\n\n';
+            return editHtml + html;
+          });
+        }
+      ]
+    }
+  </script>
+  <!-- Docsify核心 -->
+  <script src="//cdn.jsdelivr.net/npm/docsify@4"></script>
+  <!-- 搜索插件 -->
+  <script src="//cdn.jsdelivr.net/npm/docsify/lib/plugins/search.min.js"></script>
+  <!-- 代码复制插件 -->
+  <script src="//cdn.jsdelivr.net/npm/docsify-copy-code@2"></script>
+  <!-- 字数统计插件 -->
+  <script src="//cdn.jsdelivr.net/npm/docsify-count/dist/countable.min.js"></script>
+  <!-- 分页插件 -->
+  <script src="//cdn.jsdelivr.net/npm/docsify-pagination/dist/docsify-pagination.min.js"></script>
+  <!-- 代码高亮 -->
+  <script src="//cdn.jsdelivr.net/npm/prismjs@1/components/prism-java.min.js"></script>
+  <script src="//cdn.jsdelivr.net/npm/prismjs@1/components/prism-sql.min.js"></script>
+  <script src="//cdn.jsdelivr.net/npm/prismjs@1/components/prism-json.min.js"></script>
+  <script src="//cdn.jsdelivr.net/npm/prismjs@1/components/prism-yaml.min.js"></script>
+  <script src="//cdn.jsdelivr.net/npm/prismjs@1/components/prism-bash.min.js"></script>
+  <script src="//cdn.jsdelivr.net/npm/prismjs@1/components/prism-redis.min.js"></script>
+  <!-- PWA支持 -->
+  <script src="//cdn.jsdelivr.net/npm/docsify/lib/plugins/pwa.min.js"></script>
+  <!-- 图片缩放 -->
+  <script src="//cdn.jsdelivr.net/npm/docsify/lib/plugins/zoom-image.min.js"></script>
+</body>
+</html>

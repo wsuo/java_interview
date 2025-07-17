@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120">
+  <!-- 背景圆 -->
+  <circle cx="60" cy="60" r="55" fill="#42b983" stroke="#369970" stroke-width="2"/>
+  
+  <!-- Java图标 -->
+  <g transform="translate(30, 25)">
+    <!-- 咖啡杯 -->
+    <path d="M15 35 C15 35, 15 25, 25 25 L45 25 C55 25, 55 35, 55 35 L55 55 C55 65, 45 65, 35 65 L25 65 C15 65, 15 55, 15 55 Z" 
+          fill="#ffffff" stroke="#2c5282" stroke-width="2"/>
+    
+    <!-- 杯把手 -->
+    <path d="M55 35 C60 35, 65 40, 65 45 C65 50, 60 55, 55 55" 
+          fill="none" stroke="#2c5282" stroke-width="2"/>
+    
+    <!-- 蒸汽 -->
+    <path d="M25 20 Q25 15, 30 15 Q25 10, 30 10" 
+          fill="none" stroke="#ffffff" stroke-width="2"/>
+    <path d="M35 20 Q35 15, 40 15 Q35 10, 40 10" 
+          fill="none" stroke="#ffffff" stroke-width="2"/>
+    <path d="M45 20 Q45 15, 50 15 Q45 10, 50 10" 
+          fill="none" stroke="#ffffff" stroke-width="2"/>
+  </g>
+  
+  <!-- 文字 -->
+  <text x="60" y="90" font-family="Arial, sans-serif" font-size="14" font-weight="bold" 
+        text-anchor="middle" fill="#ffffff">Java面试</text>
+</svg>

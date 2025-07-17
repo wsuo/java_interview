@@ -1,0 +1,16 @@
+{
+  "name": "Java面试知识库",
+  "short_name": "Java面试",
+  "description": "全面的Java技术面试准备资料",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#42b983",
+  "icons": [
+    {
+      "src": "_media/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

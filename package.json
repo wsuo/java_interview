@@ -1,0 +1,36 @@
+{
+  "name": "java-interview-knowledge-base",
+  "version": "1.0.0",
+  "description": "Java面试知识库 - 全面的Java技术面试准备资料",
+  "main": "index.html",
+  "scripts": {
+    "serve": "docsify serve .",
+    "serve-python": "python serve.py",
+    "dev": "docsify serve . --port 3000",
+    "build": "echo 'This is a static site, no build needed'",
+    "deploy": "gh-pages -d . -m 'Deploy to GitHub Pages'"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wshuo/java_interview.git"
+  },
+  "keywords": [
+    "java",
+    "interview",
+    "spring",
+    "redis",
+    "algorithm",
+    "big-data",
+    "documentation"
+  ],
+  "author": "wshuo",
+  "license": "MIT",
+  "homepage": "https://wshuo.github.io/java_interview/",
+  "devDependencies": {
+    "docsify-cli": "^4.4.4",
+    "gh-pages": "^6.1.1"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}
