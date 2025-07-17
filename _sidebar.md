@@ -6,8 +6,9 @@
 ## 🔐 认证与安全
 * [JWT实现详解](authentication/jwt-implementation.md)
 
-## 🗄️ 中间件技术  
+## 🗄️ 中间件技术
 * [Redis实现原理](middleware/redis-implementation.md)
+* [Elasticsearch查询与场景](middleware/elasticsearch-queries-and-scenarios.md)
 
 ## 📦 Java核心
 * [Java集合框架](collections/java-collections-detailed.md)
@@ -28,6 +29,7 @@
 ## 🎯 基础知识
 * [面向对象编程](oop/README.md)
 * [并发编程](concurrency/README.md)
+* [线程池设计与多线程](concurrency/thread-pool-design-and-multithreading.md)
 
 ## 🛠️ 其他主题
 * [设计模式](design-patterns/)

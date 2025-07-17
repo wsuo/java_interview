@@ -759,7 +759,1701 @@ SparkConf conf = new SparkConf()
     .set("spark.sql.shuffle.partitions", "200");
 ```
 
-## 8. 项目实战案例
+## 8. 实际业务应用场景
+
+### 8.1 电商推荐系统
+
+#### 系统架构设计
+```
+用户行为数据 → Kafka → Spark Streaming → Redis/HBase → 推荐算法 → API服务
+     ↓              ↓           ↓            ↓          ↓        ↓
+  点击/购买/浏览   实时采集    实时计算     特征存储    协同过滤   推荐结果
+  收藏/评分/搜索   日志收集    用户画像     商品画像    深度学习   个性化展示
+```
+
+#### 技术选型决策
+```java
+@Configuration
+public class RecommendationSystemConfig {
+
+    /**
+     * 实时推荐架构
+     * - 用户行为实时采集：Kafka
+     * - 实时特征计算：Spark Streaming
+     * - 特征存储：Redis + HBase
+     * - 推荐算法：Spark MLlib + TensorFlow
+     */
+
+    // 用户行为数据模型
+    @Data
+    public static class UserBehavior {
+        private String userId;
+        private String itemId;
+        private String behavior;  // click, buy, view, collect
+        private Long timestamp;
+        private String category;
+        private Double rating;
+        private Map<String, Object> context;  // 上下文信息
+    }
+
+    // 实时特征计算
+    @Component
+    public class RealTimeFeatureCalculator {
+
+        public void processUserBehavior(JavaDStream<UserBehavior> behaviorStream) {
+            // 计算用户实时特征
+            JavaPairDStream<String, UserFeature> userFeatures = behaviorStream
+                .mapToPair(behavior -> new Tuple2<>(behavior.getUserId(), behavior))
+                .groupByKey()
+                .mapValues(behaviors -> {
+                    UserFeature feature = new UserFeature();
+                    // 计算用户偏好类别
+                    Map<String, Long> categoryCount = StreamSupport.stream(behaviors.spliterator(), false)
+                        .collect(Collectors.groupingBy(
+                            UserBehavior::getCategory,
+                            Collectors.counting()
+                        ));
+                    feature.setPreferredCategories(categoryCount);
+
+                    // 计算活跃度
+                    long recentBehaviorCount = StreamSupport.stream(behaviors.spliterator(), false)
+                        .filter(b -> System.currentTimeMillis() - b.getTimestamp() < 3600000) // 1小时内
+                        .count();
+                    feature.setActivityLevel(recentBehaviorCount);
+
+                    return feature;
+                });
+
+            // 存储到Redis
+            userFeatures.foreachRDD(rdd -> {
+                rdd.foreach(tuple -> {
+                    String userId = tuple._1();
+                    UserFeature feature = tuple._2();
+                    redisTemplate.opsForValue().set(
+                        "user_feature:" + userId,
+                        feature,
+                        Duration.ofHours(24)
+                    );
+                });
+            });
+        }
+    }
+}
+```
+
+#### 推荐算法实现
+```java
+@Service
+public class RecommendationService {
+
+    /**
+     * 混合推荐策略
+     * 1. 协同过滤（CF）- 基于用户行为相似性
+     * 2. 内容推荐（CB）- 基于商品特征相似性
+     * 3. 深度学习（DL）- 基于神经网络模型
+     */
+
+    public List<RecommendationItem> getRecommendations(String userId, int count) {
+        // 获取用户特征
+        UserFeature userFeature = getUserFeature(userId);
+
+        // 多路召回
+        List<RecommendationItem> cfItems = collaborativeFiltering(userId, count * 2);
+        List<RecommendationItem> cbItems = contentBasedFiltering(userFeature, count * 2);
+        List<RecommendationItem> dlItems = deepLearningRecommendation(userId, count * 2);
+
+        // 融合排序
+        List<RecommendationItem> candidates = new ArrayList<>();
+        candidates.addAll(cfItems);
+        candidates.addAll(cbItems);
+        candidates.addAll(dlItems);
+
+        // 去重和重排序
+        return rankAndFilter(candidates, userFeature, count);
+    }
+
+    private List<RecommendationItem> collaborativeFiltering(String userId, int count) {
+        // 使用Spark MLlib的ALS算法
+        JavaRDD<Rating> ratingsRDD = getUserRatings();
+        ALS als = new ALS()
+            .setRank(50)
+            .setIterations(10)
+            .setLambda(0.01);
+
+        MatrixFactorizationModel model = als.run(ratingsRDD.rdd());
+
+        // 为用户推荐商品
+        Rating[] recommendations = model.recommendProducts(
+            Integer.parseInt(userId), count
+        );
+
+        return Arrays.stream(recommendations)
+            .map(rating -> new RecommendationItem(
+                String.valueOf(rating.product()),
+                rating.rating(),
+                "CF"
+            ))
+            .collect(Collectors.toList());
+    }
+}
+```
+
+### 8.2 金融风控系统
+
+#### 实时风控架构
+```
+交易请求 → 规则引擎 → 机器学习模型 → 风险评分 → 决策引擎 → 处理结果
+   ↓         ↓          ↓           ↓        ↓        ↓
+ 用户信息   黑名单检查   特征工程     风险概率   阈值判断   通过/拒绝/人工审核
+ 交易信息   规则匹配     模型预测     评分计算   策略执行   风险监控
+```
+
+#### 实时风控实现
+```java
+@Service
+public class RealTimeRiskControlService {
+
+    @Autowired
+    private RuleEngine ruleEngine;
+
+    @Autowired
+    private MLModelService mlModelService;
+
+    /**
+     * 实时风控决策
+     */
+    public RiskDecision evaluateTransaction(TransactionRequest request) {
+        // 1. 基础信息验证
+        if (!validateBasicInfo(request)) {
+            return RiskDecision.reject("基础信息验证失败");
+        }
+
+        // 2. 黑名单检查
+        if (isInBlacklist(request.getUserId(), request.getDeviceId())) {
+            return RiskDecision.reject("用户在黑名单中");
+        }
+
+        // 3. 规则引擎检查
+        RuleResult ruleResult = ruleEngine.evaluate(request);
+        if (ruleResult.isReject()) {
+            return RiskDecision.reject(ruleResult.getReason());
+        }
+
+        // 4. 机器学习模型评分
+        TransactionFeature feature = extractFeatures(request);
+        double riskScore = mlModelService.predict(feature);
+
+        // 5. 综合决策
+        return makeDecision(ruleResult, riskScore, request);
+    }
+
+    private TransactionFeature extractFeatures(TransactionRequest request) {
+        TransactionFeature feature = new TransactionFeature();
+
+        // 用户特征
+        UserProfile userProfile = getUserProfile(request.getUserId());
+        feature.setUserAge(userProfile.getAge());
+        feature.setUserLevel(userProfile.getLevel());
+        feature.setHistoryTransactionCount(userProfile.getTransactionCount());
+
+        // 交易特征
+        feature.setTransactionAmount(request.getAmount());
+        feature.setTransactionTime(request.getTimestamp());
+        feature.setMerchantCategory(request.getMerchantCategory());
+
+        // 设备特征
+        DeviceInfo deviceInfo = getDeviceInfo(request.getDeviceId());
+        feature.setDeviceType(deviceInfo.getType());
+        feature.setDeviceLocation(deviceInfo.getLocation());
+
+        // 行为特征
+        BehaviorFeature behaviorFeature = calculateBehaviorFeature(request.getUserId());
+        feature.setRecentTransactionFrequency(behaviorFeature.getFrequency());
+        feature.setAverageTransactionAmount(behaviorFeature.getAvgAmount());
+
+        return feature;
+    }
+
+    private RiskDecision makeDecision(RuleResult ruleResult, double riskScore, TransactionRequest request) {
+        // 综合评分
+        double finalScore = ruleResult.getScore() * 0.3 + riskScore * 0.7;
+
+        if (finalScore > 0.8) {
+            return RiskDecision.reject("风险评分过高: " + finalScore);
+        } else if (finalScore > 0.6) {
+            return RiskDecision.review("需要人工审核: " + finalScore);
+        } else {
+            return RiskDecision.approve("风险可控: " + finalScore);
+        }
+    }
+}
+```
+
+#### 风控规则引擎
+```java
+@Component
+public class RuleEngine {
+
+    private List<RiskRule> rules = Arrays.asList(
+        new AmountLimitRule(),
+        new FrequencyLimitRule(),
+        new LocationRule(),
+        new TimeRule(),
+        new DeviceRule()
+    );
+
+    public RuleResult evaluate(TransactionRequest request) {
+        double totalScore = 0.0;
+        List<String> triggeredRules = new ArrayList<>();
+
+        for (RiskRule rule : rules) {
+            RuleResult result = rule.evaluate(request);
+            totalScore += result.getScore() * rule.getWeight();
+
+            if (result.isTriggered()) {
+                triggeredRules.add(rule.getName() + ": " + result.getReason());
+            }
+
+            // 如果有规则直接拒绝，立即返回
+            if (result.isReject()) {
+                return RuleResult.reject(result.getReason());
+            }
+        }
+
+        return new RuleResult(totalScore, triggeredRules);
+    }
+
+    // 金额限制规则
+    public static class AmountLimitRule implements RiskRule {
+        @Override
+        public RuleResult evaluate(TransactionRequest request) {
+            double amount = request.getAmount();
+            UserProfile profile = getUserProfile(request.getUserId());
+
+            // 单笔限额检查
+            if (amount > profile.getSingleTransactionLimit()) {
+                return RuleResult.reject("超过单笔交易限额");
+            }
+
+            // 日累计限额检查
+            double todayTotal = getTodayTransactionTotal(request.getUserId());
+            if (todayTotal + amount > profile.getDailyTransactionLimit()) {
+                return RuleResult.reject("超过日累计交易限额");
+            }
+
+            // 风险评分
+            double score = Math.min(amount / profile.getSingleTransactionLimit(), 1.0);
+            return new RuleResult(score, score > 0.8, "大额交易");
+        }
+
+        @Override
+        public double getWeight() { return 0.3; }
+
+        @Override
+        public String getName() { return "金额限制规则"; }
+    }
+}
+```
+
+### 8.3 物联网数据处理
+
+#### IoT数据处理架构
+```
+传感器设备 → MQTT/CoAP → Kafka → Spark Streaming → 时序数据库 → 监控告警
+    ↓           ↓         ↓         ↓            ↓          ↓
+  温度/湿度    协议转换   消息队列   实时计算      InfluxDB    异常检测
+  压力/流量    数据采集   数据缓冲   聚合分析      TimescaleDB  预警通知
+  位置/状态    边缘计算   负载均衡   模式识别      OpenTSDB    可视化展示
+```
+
+#### 实时数据处理
+```java
+@Component
+public class IoTDataProcessor {
+
+    /**
+     * 处理IoT传感器数据流
+     */
+    public void processIoTDataStream() {
+        // 创建Spark Streaming上下文
+        JavaStreamingContext jssc = new JavaStreamingContext(sparkConf, Durations.seconds(5));
+
+        // 从Kafka读取IoT数据
+        JavaInputDStream<ConsumerRecord<String, String>> kafkaStream =
+            KafkaUtils.createDirectStream(
+                jssc,
+                LocationStrategies.PreferConsistent(),
+                ConsumerStrategies.<String, String>Subscribe(
+                    Arrays.asList("iot-sensor-data"), kafkaParams
+                )
+            );
+
+        // 解析传感器数据
+        JavaDStream<SensorData> sensorDataStream = kafkaStream
+            .map(record -> JSON.parseObject(record.value(), SensorData.class))
+            .filter(data -> data != null && data.isValid());
+
+        // 数据清洗和转换
+        JavaDStream<SensorData> cleanedDataStream = sensorDataStream
+            .filter(this::isValidSensorData)
+            .map(this::normalizeSensorData);
+
+        // 实时聚合计算
+        JavaPairDStream<String, SensorAggregation> aggregatedStream = cleanedDataStream
+            .mapToPair(data -> new Tuple2<>(data.getDeviceId(), data))
+            .groupByKeyAndWindow(Durations.minutes(5), Durations.minutes(1))
+            .mapValues(this::aggregateSensorData);
+
+        // 异常检测
+        JavaDStream<Alert> alertStream = aggregatedStream
+            .map(tuple -> detectAnomalies(tuple._1(), tuple._2()))
+            .filter(alert -> alert != null);
+
+        // 存储到时序数据库
+        aggregatedStream.foreachRDD(rdd -> {
+            rdd.foreach(tuple -> {
+                String deviceId = tuple._1();
+                SensorAggregation aggregation = tuple._2();
+                saveToTimeSeriesDB(deviceId, aggregation);
+            });
+        });
+
+        // 发送告警
+        alertStream.foreachRDD(rdd -> {
+            rdd.foreach(alert -> sendAlert(alert));
+        });
+
+        jssc.start();
+        jssc.awaitTermination();
+    }
+
+    private SensorAggregation aggregateSensorData(Iterable<SensorData> sensorDataList) {
+        List<SensorData> dataList = StreamSupport.stream(sensorDataList.spliterator(), false)
+            .collect(Collectors.toList());
+
+        if (dataList.isEmpty()) {
+            return null;
+        }
+
+        SensorAggregation aggregation = new SensorAggregation();
+        aggregation.setDeviceId(dataList.get(0).getDeviceId());
+        aggregation.setTimestamp(System.currentTimeMillis());
+
+        // 计算统计指标
+        DoubleSummaryStatistics tempStats = dataList.stream()
+            .mapToDouble(SensorData::getTemperature)
+            .summaryStatistics();
+
+        aggregation.setAvgTemperature(tempStats.getAverage());
+        aggregation.setMaxTemperature(tempStats.getMax());
+        aggregation.setMinTemperature(tempStats.getMin());
+
+        DoubleSummaryStatistics humidityStats = dataList.stream()
+            .mapToDouble(SensorData::getHumidity)
+            .summaryStatistics();
+
+        aggregation.setAvgHumidity(humidityStats.getAverage());
+        aggregation.setMaxHumidity(humidityStats.getMax());
+        aggregation.setMinHumidity(humidityStats.getMin());
+
+        // 计算数据质量指标
+        long validDataCount = dataList.stream()
+            .filter(SensorData::isValid)
+            .count();
+        aggregation.setDataQuality((double) validDataCount / dataList.size());
+
+        return aggregation;
+    }
+
+    private Alert detectAnomalies(String deviceId, SensorAggregation aggregation) {
+        // 获取设备的正常范围配置
+        DeviceConfig config = getDeviceConfig(deviceId);
+
+        Alert alert = null;
+
+        // 温度异常检测
+        if (aggregation.getMaxTemperature() > config.getMaxTemperature() ||
+            aggregation.getMinTemperature() < config.getMinTemperature()) {
+            alert = new Alert();
+            alert.setDeviceId(deviceId);
+            alert.setType("TEMPERATURE_ANOMALY");
+            alert.setMessage(String.format("温度异常: %.2f°C (正常范围: %.2f-%.2f°C)",
+                aggregation.getAvgTemperature(),
+                config.getMinTemperature(),
+                config.getMaxTemperature()));
+            alert.setSeverity(calculateSeverity(aggregation, config));
+        }
+
+        // 湿度异常检测
+        if (aggregation.getMaxHumidity() > config.getMaxHumidity() ||
+            aggregation.getMinHumidity() < config.getMinHumidity()) {
+            if (alert == null) {
+                alert = new Alert();
+                alert.setDeviceId(deviceId);
+                alert.setType("HUMIDITY_ANOMALY");
+            }
+            alert.setMessage(alert.getMessage() + String.format(" 湿度异常: %.2f%% (正常范围: %.2f-%.2f%%)",
+                aggregation.getAvgHumidity(),
+                config.getMinHumidity(),
+                config.getMaxHumidity()));
+        }
+
+        // 数据质量检测
+        if (aggregation.getDataQuality() < 0.8) {
+            if (alert == null) {
+                alert = new Alert();
+                alert.setDeviceId(deviceId);
+                alert.setType("DATA_QUALITY_ISSUE");
+            }
+            alert.setMessage(alert.getMessage() + String.format(" 数据质量异常: %.2f%%",
+                aggregation.getDataQuality() * 100));
+        }
+
+        return alert;
+    }
+}
+```
+
+## 9. 技术选型决策过程
+
+### 9.1 技术选型矩阵
+
+#### 消息队列选型
+| 特性 | Kafka | RabbitMQ | RocketMQ | Pulsar |
+|------|-------|----------|----------|--------|
+| 吞吐量 | 极高 | 中等 | 高 | 极高 |
+| 延迟 | 低 | 极低 | 低 | 低 |
+| 可靠性 | 高 | 极高 | 极高 | 高 |
+| 运维复杂度 | 中等 | 低 | 中等 | 高 |
+| 生态成熟度 | 极高 | 高 | 中等 | 中等 |
+| 适用场景 | 大数据、日志 | 业务消息 | 业务消息 | 云原生 |
+
+#### 计算引擎选型
+| 特性 | Spark | Flink | Storm | Hadoop MapReduce |
+|------|-------|-------|-------|------------------|
+| 处理模式 | 批+流 | 流为主 | 流处理 | 批处理 |
+| 延迟 | 秒级 | 毫秒级 | 毫秒级 | 分钟级 |
+| 吞吐量 | 极高 | 高 | 中等 | 高 |
+| 容错性 | 高 | 极高 | 高 | 极高 |
+| 易用性 | 高 | 中等 | 低 | 低 |
+| 内存使用 | 高 | 中等 | 低 | 低 |
+
+### 9.2 选型决策流程
+```java
+@Component
+public class TechnologySelectionFramework {
+
+    /**
+     * 技术选型决策框架
+     */
+    public TechStack selectTechnology(ProjectRequirement requirement) {
+        // 1. 需求分析
+        RequirementAnalysis analysis = analyzeRequirement(requirement);
+
+        // 2. 技术评估
+        List<TechnologyOption> options = evaluateTechnologies(analysis);
+
+        // 3. 权重计算
+        Map<String, Double> weights = calculateWeights(requirement);
+
+        // 4. 综合评分
+        TechnologyOption bestOption = options.stream()
+            .max(Comparator.comparing(option -> calculateScore(option, weights)))
+            .orElseThrow();
+
+        // 5. 风险评估
+        RiskAssessment risk = assessRisk(bestOption);
+
+        return new TechStack(bestOption, risk);
+    }
+
+    private RequirementAnalysis analyzeRequirement(ProjectRequirement requirement) {
+        RequirementAnalysis analysis = new RequirementAnalysis();
+
+        // 数据量分析
+        if (requirement.getDataVolume() > 1_000_000_000) {  // 10亿条记录
+            analysis.setDataScale(DataScale.BIG_DATA);
+        } else if (requirement.getDataVolume() > 1_000_000) {  // 100万条记录
+            analysis.setDataScale(DataScale.MEDIUM_DATA);
+        } else {
+            analysis.setDataScale(DataScale.SMALL_DATA);
+        }
+
+        // 实时性要求分析
+        if (requirement.getLatencyRequirement() < 100) {  // 100ms
+            analysis.setLatencyLevel(LatencyLevel.REAL_TIME);
+        } else if (requirement.getLatencyRequirement() < 1000) {  // 1s
+            analysis.setLatencyLevel(LatencyLevel.NEAR_REAL_TIME);
+        } else {
+            analysis.setLatencyLevel(LatencyLevel.BATCH);
+        }
+
+        // 一致性要求分析
+        analysis.setConsistencyLevel(requirement.getConsistencyRequirement());
+
+        // 可用性要求分析
+        analysis.setAvailabilityLevel(requirement.getAvailabilityRequirement());
+
+        return analysis;
+    }
+}
+```
+
+## 10. 性能调优实战经验
+
+### 10.1 Spark性能调优
+
+#### 内存调优
+```scala
+// Spark配置优化
+val sparkConf = new SparkConf()
+  .setAppName("BigDataProcessing")
+  // 执行器内存配置
+  .set("spark.executor.memory", "8g")
+  .set("spark.executor.cores", "4")
+  .set("spark.executor.instances", "20")
+
+  // 内存分配比例
+  .set("spark.sql.adaptive.enabled", "true")
+  .set("spark.sql.adaptive.coalescePartitions.enabled", "true")
+  .set("spark.sql.adaptive.skewJoin.enabled", "true")
+
+  // 序列化优化
+  .set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+  .set("spark.kryo.registrationRequired", "false")
+
+  // 网络优化
+  .set("spark.network.timeout", "300s")
+  .set("spark.sql.broadcastTimeout", "300")
+
+  // 动态资源分配
+  .set("spark.dynamicAllocation.enabled", "true")
+  .set("spark.dynamicAllocation.minExecutors", "5")
+  .set("spark.dynamicAllocation.maxExecutors", "50")
+```
+
+#### 数据倾斜处理
+```java
+@Component
+public class DataSkewHandler {
+
+    /**
+     * 处理数据倾斜的策略
+     */
+    public Dataset<Row> handleDataSkew(Dataset<Row> dataset, String keyColumn) {
+        // 策略1: 加盐处理
+        Dataset<Row> saltedDataset = addSalt(dataset, keyColumn);
+
+        // 策略2: 预聚合
+        Dataset<Row> preAggregated = preAggregate(saltedDataset, keyColumn);
+
+        // 策略3: 广播小表
+        if (isSmallTable(dataset)) {
+            return broadcast(dataset);
+        }
+
+        return preAggregated;
+    }
+
+    private Dataset<Row> addSalt(Dataset<Row> dataset, String keyColumn) {
+        // 添加随机盐值
+        return dataset.withColumn("salted_key",
+            concat(col(keyColumn), lit("_"),
+                   (rand().multiply(100)).cast(DataTypes.IntegerType)));
+    }
+
+    private Dataset<Row> preAggregate(Dataset<Row> dataset, String keyColumn) {
+        // 预聚合减少数据量
+        return dataset
+            .groupBy("salted_key")
+            .agg(
+                sum("amount").as("total_amount"),
+                count("*").as("record_count"),
+                max("timestamp").as("latest_timestamp")
+            );
+    }
+}
+```
+
+### 10.2 Kafka性能调优
+
+#### 生产者优化
+```java
+@Configuration
+public class KafkaProducerOptimization {
+
+    @Bean
+    public ProducerFactory<String, String> producerFactory() {
+        Map<String, Object> props = new HashMap<>();
+
+        // 基础配置
+        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");
+        props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+
+        // 性能优化配置
+        props.put(ProducerConfig.BATCH_SIZE_CONFIG, 65536);  // 64KB批次大小
+        props.put(ProducerConfig.LINGER_MS_CONFIG, 10);      // 等待10ms收集更多消息
+        props.put(ProducerConfig.COMPRESSION_TYPE_CONFIG, "lz4");  // 压缩算法
+        props.put(ProducerConfig.BUFFER_MEMORY_CONFIG, 67108864);  // 64MB缓冲区
+
+        // 可靠性配置
+        props.put(ProducerConfig.ACKS_CONFIG, "1");          // 等待leader确认
+        props.put(ProducerConfig.RETRIES_CONFIG, 3);         // 重试次数
+        props.put(ProducerConfig.RETRY_BACKOFF_MS_CONFIG, 100);
+
+        // 幂等性配置
+        props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
+
+        return new DefaultKafkaProducerFactory<>(props);
+    }
+}
+```
+
+#### 消费者优化
+```java
+@Configuration
+public class KafkaConsumerOptimization {
+
+    @Bean
+    public ConsumerFactory<String, String> consumerFactory() {
+        Map<String, Object> props = new HashMap<>();
+
+        // 基础配置
+        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");
+        props.put(ConsumerConfig.GROUP_ID_CONFIG, "big-data-consumer");
+        props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+        props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+
+        // 性能优化配置
+        props.put(ConsumerConfig.FETCH_MIN_BYTES_CONFIG, 1024);      // 最小拉取1KB
+        props.put(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG, 500);     // 最大等待500ms
+        props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 1000);     // 每次拉取1000条
+        props.put(ConsumerConfig.RECEIVE_BUFFER_CONFIG, 65536);      // 64KB接收缓冲区
+
+        // 偏移量管理
+        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);  // 手动提交偏移量
+
+        return new DefaultKafkaConsumerFactory<>(props);
+    }
+}
+```
+
+## 11. 常见架构模式
+
+### 11.1 Lambda架构
+```
+实时数据流 → 流处理层 → 实时视图
+    ↓           ↓         ↓
+批处理数据 → 批处理层 → 批处理视图 → 服务层 → 查询结果
+    ↓           ↓         ↓        ↓
+ 历史数据   离线计算   准确结果   结果合并
+```
+
+#### Lambda架构实现
+```java
+@Service
+public class LambdaArchitectureService {
+
+    @Autowired
+    private StreamProcessingService streamService;
+
+    @Autowired
+    private BatchProcessingService batchService;
+
+    @Autowired
+    private ServingLayerService servingService;
+
+    /**
+     * Lambda架构查询接口
+     */
+    public QueryResult query(QueryRequest request) {
+        // 从实时视图获取最新数据
+        RealtimeResult realtimeResult = streamService.queryRealtimeView(request);
+
+        // 从批处理视图获取历史数据
+        BatchResult batchResult = batchService.queryBatchView(request);
+
+        // 在服务层合并结果
+        return servingService.mergeResults(realtimeResult, batchResult);
+    }
+
+    /**
+     * 流处理层实现
+     */
+    @Component
+    public static class StreamProcessingService {
+
+        public void processRealTimeData() {
+            JavaStreamingContext jssc = createStreamingContext();
+
+            // 从Kafka读取实时数据
+            JavaInputDStream<ConsumerRecord<String, String>> kafkaStream =
+                createKafkaStream(jssc);
+
+            // 实时计算
+            JavaDStream<ProcessedData> processedStream = kafkaStream
+                .map(record -> parseData(record.value()))
+                .filter(data -> data != null)
+                .window(Durations.minutes(5), Durations.minutes(1))
+                .map(this::processData);
+
+            // 更新实时视图
+            processedStream.foreachRDD(rdd -> {
+                rdd.foreach(data -> updateRealtimeView(data));
+            });
+
+            jssc.start();
+            jssc.awaitTermination();
+        }
+
+        private void updateRealtimeView(ProcessedData data) {
+            // 更新Redis中的实时视图
+            String key = "realtime:" + data.getKey();
+            redisTemplate.opsForValue().set(key, data, Duration.ofMinutes(10));
+        }
+    }
+
+    /**
+     * 批处理层实现
+     */
+    @Component
+    public static class BatchProcessingService {
+
+        @Scheduled(cron = "0 0 2 * * ?")  // 每天凌晨2点执行
+        public void processBatchData() {
+            SparkSession spark = SparkSession.builder()
+                .appName("BatchProcessing")
+                .getOrCreate();
+
+            // 读取历史数据
+            Dataset<Row> historicalData = spark.read()
+                .format("parquet")
+                .load("hdfs://path/to/historical/data");
+
+            // 批处理计算
+            Dataset<Row> aggregatedData = historicalData
+                .groupBy("key", "date")
+                .agg(
+                    sum("value").as("total_value"),
+                    count("*").as("count"),
+                    avg("value").as("avg_value")
+                );
+
+            // 保存到批处理视图
+            aggregatedData.write()
+                .mode(SaveMode.Overwrite)
+                .format("parquet")
+                .save("hdfs://path/to/batch/view");
+        }
+    }
+}
+```
+
+### 11.2 Kappa架构
+```
+数据流 → 流处理引擎 → 存储层 → 查询层
+  ↓         ↓          ↓       ↓
+实时数据   Flink/Kafka  Kafka   API服务
+历史数据   Streams     存储     实时查询
+```
+
+#### Kappa架构实现
+```java
+@Service
+public class KappaArchitectureService {
+
+    /**
+     * 统一流处理
+     */
+    public void processUnifiedStream() {
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime);
+
+        // 配置Kafka消费者
+        Properties kafkaProps = new Properties();
+        kafkaProps.setProperty("bootstrap.servers", "localhost:9092");
+        kafkaProps.setProperty("group.id", "kappa-processor");
+
+        FlinkKafkaConsumer<String> kafkaConsumer = new FlinkKafkaConsumer<>(
+            "input-topic", new SimpleStringSchema(), kafkaProps);
+
+        // 设置从最早的记录开始消费（处理历史数据）
+        kafkaConsumer.setStartFromEarliest();
+
+        DataStream<String> inputStream = env.addSource(kafkaConsumer);
+
+        // 数据解析和转换
+        DataStream<Event> eventStream = inputStream
+            .map(json -> JSON.parseObject(json, Event.class))
+            .filter(event -> event != null)
+            .assignTimestampsAndWatermarks(
+                WatermarkStrategy.<Event>forBoundedOutOfOrderness(Duration.ofSeconds(10))
+                    .withTimestampAssigner((event, timestamp) -> event.getTimestamp())
+            );
+
+        // 窗口聚合
+        DataStream<AggregatedResult> aggregatedStream = eventStream
+            .keyBy(Event::getKey)
+            .window(TumblingEventTimeWindows.of(Time.minutes(5)))
+            .aggregate(new EventAggregateFunction());
+
+        // 输出到Kafka
+        FlinkKafkaProducer<AggregatedResult> kafkaProducer = new FlinkKafkaProducer<>(
+            "output-topic",
+            new AggregatedResultSerializationSchema(),
+            kafkaProps,
+            FlinkKafkaProducer.Semantic.EXACTLY_ONCE
+        );
+
+        aggregatedStream.addSink(kafkaProducer);
+
+        try {
+            env.execute("Kappa Architecture Processing");
+        } catch (Exception e) {
+            log.error("Kappa processing failed", e);
+        }
+    }
+}
+```
+
+### 11.3 微服务大数据架构
+```
+API网关 → 微服务集群 → 消息队列 → 大数据平台 → 数据服务
+   ↓         ↓          ↓         ↓          ↓
+用户请求   业务处理    异步消息   数据处理    结果查询
+负载均衡   服务发现    事件驱动   批流一体    缓存加速
+```
+
+## 12. 面试中的系统设计题目
+
+### 12.1 设计一个实时推荐系统
+
+#### 系统需求分析
+- **功能需求**：实时推荐、个性化、多样性、新颖性
+- **非功能需求**：低延迟(<100ms)、高并发(10万QPS)、高可用(99.9%)
+- **数据规模**：1亿用户、1000万商品、100亿行为记录
+
+#### 系统设计方案
+```java
+/**
+ * 实时推荐系统架构设计
+ */
+@Component
+public class RealtimeRecommendationSystemDesign {
+
+    /**
+     * 系统架构组件
+     */
+    public class SystemArchitecture {
+        // 数据采集层
+        private KafkaCluster dataIngestion;
+
+        // 实时计算层
+        private SparkStreamingCluster realtimeComputing;
+
+        // 特征存储层
+        private RedisCluster featureStore;
+        private HBaseCluster profileStore;
+
+        // 模型服务层
+        private TensorFlowServing modelServing;
+
+        // 推荐服务层
+        private RecommendationService recommendationAPI;
+
+        // 缓存层
+        private RedisCluster resultCache;
+    }
+
+    /**
+     * 推荐算法设计
+     */
+    public class RecommendationAlgorithm {
+
+        // 召回阶段：从海量商品中召回候选集
+        public List<Item> recall(String userId) {
+            List<Item> candidates = new ArrayList<>();
+
+            // 协同过滤召回
+            candidates.addAll(collaborativeFilteringRecall(userId));
+
+            // 内容召回
+            candidates.addAll(contentBasedRecall(userId));
+
+            // 热门召回
+            candidates.addAll(popularItemsRecall());
+
+            // 新品召回
+            candidates.addAll(newItemsRecall());
+
+            return candidates;
+        }
+
+        // 排序阶段：对候选集进行精确排序
+        public List<Item> rank(String userId, List<Item> candidates) {
+            // 特征工程
+            List<FeatureVector> features = candidates.stream()
+                .map(item -> extractFeatures(userId, item))
+                .collect(Collectors.toList());
+
+            // 模型预测
+            List<Double> scores = modelServing.predict(features);
+
+            // 排序和过滤
+            return IntStream.range(0, candidates.size())
+                .boxed()
+                .sorted((i, j) -> Double.compare(scores.get(j), scores.get(i)))
+                .map(candidates::get)
+                .limit(100)
+                .collect(Collectors.toList());
+        }
+    }
+
+    /**
+     * 性能优化策略
+     */
+    public class PerformanceOptimization {
+
+        // 多级缓存策略
+        public List<Item> getRecommendations(String userId) {
+            // L1缓存：本地缓存
+            List<Item> result = localCache.get(userId);
+            if (result != null) {
+                return result;
+            }
+
+            // L2缓存：Redis缓存
+            result = redisCache.get("rec:" + userId);
+            if (result != null) {
+                localCache.put(userId, result);
+                return result;
+            }
+
+            // L3：实时计算
+            result = computeRecommendations(userId);
+
+            // 更新缓存
+            redisCache.set("rec:" + userId, result, Duration.ofMinutes(10));
+            localCache.put(userId, result);
+
+            return result;
+        }
+
+        // 预计算策略
+        @Scheduled(fixedDelay = 300000)  // 5分钟执行一次
+        public void precomputeRecommendations() {
+            // 为活跃用户预计算推荐结果
+            List<String> activeUsers = getActiveUsers();
+
+            activeUsers.parallelStream().forEach(userId -> {
+                try {
+                    List<Item> recommendations = computeRecommendations(userId);
+                    redisCache.set("rec:" + userId, recommendations, Duration.ofHours(1));
+                } catch (Exception e) {
+                    log.error("Failed to precompute recommendations for user: " + userId, e);
+                }
+            });
+        }
+    }
+}
+```
+
+### 12.2 设计一个日志分析系统
+
+#### 系统架构设计
+```java
+/**
+ * 分布式日志分析系统
+ */
+@Component
+public class LogAnalysisSystemDesign {
+
+    /**
+     * 日志采集架构
+     */
+    public class LogCollectionArchitecture {
+
+        // 日志采集配置
+        public void configureLogCollection() {
+            // Filebeat配置
+            FilebeatConfig filebeatConfig = FilebeatConfig.builder()
+                .inputPaths(Arrays.asList("/var/log/app/*.log"))
+                .outputKafka(KafkaOutput.builder()
+                    .brokers(Arrays.asList("kafka1:9092", "kafka2:9092"))
+                    .topic("application-logs")
+                    .build())
+                .build();
+
+            // Logstash配置
+            LogstashConfig logstashConfig = LogstashConfig.builder()
+                .input(KafkaInput.builder()
+                    .topics(Arrays.asList("application-logs"))
+                    .bootstrapServers("kafka1:9092,kafka2:9092")
+                    .build())
+                .filter(GrokFilter.builder()
+                    .pattern("%{TIMESTAMP_ISO8601:timestamp} %{LOGLEVEL:level} %{GREEDYDATA:message}")
+                    .build())
+                .output(ElasticsearchOutput.builder()
+                    .hosts(Arrays.asList("es1:9200", "es2:9200"))
+                    .index("logs-%{+YYYY.MM.dd}")
+                    .build())
+                .build();
+        }
+    }
+
+    /**
+     * 实时日志分析
+     */
+    public class RealTimeLogAnalysis {
+
+        public void analyzeLogsInRealTime() {
+            StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+
+            // 从Kafka读取日志
+            DataStream<String> logStream = env.addSource(
+                new FlinkKafkaConsumer<>("application-logs", new SimpleStringSchema(), kafkaProps)
+            );
+
+            // 解析日志
+            DataStream<LogEvent> parsedLogs = logStream
+                .map(this::parseLogEvent)
+                .filter(Objects::nonNull);
+
+            // 错误日志告警
+            DataStream<Alert> errorAlerts = parsedLogs
+                .filter(log -> "ERROR".equals(log.getLevel()))
+                .keyBy(LogEvent::getService)
+                .window(TumblingProcessingTimeWindows.of(Time.minutes(1)))
+                .aggregate(new ErrorCountAggregator())
+                .filter(count -> count.getErrorCount() > 10)  // 1分钟内超过10个错误
+                .map(count -> new Alert("HIGH_ERROR_RATE", count.getService(), count.getErrorCount()));
+
+            // 性能监控
+            DataStream<PerformanceMetric> performanceMetrics = parsedLogs
+                .filter(log -> log.getResponseTime() != null)
+                .keyBy(LogEvent::getEndpoint)
+                .window(TumblingProcessingTimeWindows.of(Time.minutes(5)))
+                .aggregate(new PerformanceAggregator());
+
+            // 输出告警
+            errorAlerts.addSink(new AlertSink());
+
+            // 输出性能指标
+            performanceMetrics.addSink(new MetricsSink());
+
+            try {
+                env.execute("Real-time Log Analysis");
+            } catch (Exception e) {
+                log.error("Log analysis job failed", e);
+            }
+        }
+
+        private LogEvent parseLogEvent(String logLine) {
+            try {
+                // 使用正则表达式或JSON解析日志
+                Pattern pattern = Pattern.compile(
+                    "(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}) (\\w+) \\[(\\w+)\\] (.+)"
+                );
+                Matcher matcher = pattern.matcher(logLine);
+
+                if (matcher.matches()) {
+                    LogEvent event = new LogEvent();
+                    event.setTimestamp(LocalDateTime.parse(matcher.group(1),
+                        DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
+                    event.setLevel(matcher.group(2));
+                    event.setService(matcher.group(3));
+                    event.setMessage(matcher.group(4));
+
+                    // 提取响应时间（如果存在）
+                    Pattern responseTimePattern = Pattern.compile(".*response_time=(\\d+)ms.*");
+                    Matcher responseTimeMatcher = responseTimePattern.matcher(event.getMessage());
+                    if (responseTimeMatcher.matches()) {
+                        event.setResponseTime(Long.parseLong(responseTimeMatcher.group(1)));
+                    }
+
+                    return event;
+                }
+            } catch (Exception e) {
+                log.warn("Failed to parse log line: " + logLine, e);
+            }
+            return null;
+        }
+    }
+
+    /**
+     * 批量日志分析
+     */
+    public class BatchLogAnalysis {
+
+        @Scheduled(cron = "0 0 1 * * ?")  // 每天凌晨1点执行
+        public void dailyLogAnalysis() {
+            SparkSession spark = SparkSession.builder()
+                .appName("Daily Log Analysis")
+                .getOrCreate();
+
+            // 读取昨天的日志数据
+            String yesterday = LocalDate.now().minusDays(1).format(DateTimeFormatter.ofPattern("yyyy.MM.dd"));
+            Dataset<Row> logs = spark.read()
+                .format("org.elasticsearch.spark.sql")
+                .option("es.nodes", "es1,es2")
+                .option("es.port", "9200")
+                .load("logs-" + yesterday);
+
+            // 分析API调用统计
+            Dataset<Row> apiStats = logs
+                .filter(col("level").equalTo("INFO"))
+                .filter(col("message").contains("API_CALL"))
+                .groupBy("endpoint", "method")
+                .agg(
+                    count("*").as("call_count"),
+                    avg("response_time").as("avg_response_time"),
+                    max("response_time").as("max_response_time"),
+                    expr("percentile_approx(response_time, 0.95)").as("p95_response_time")
+                );
+
+            // 分析错误统计
+            Dataset<Row> errorStats = logs
+                .filter(col("level").equalTo("ERROR"))
+                .groupBy("service", "error_type")
+                .agg(
+                    count("*").as("error_count"),
+                    collect_list("message").as("error_messages")
+                );
+
+            // 保存分析结果
+            apiStats.write()
+                .mode(SaveMode.Overwrite)
+                .format("parquet")
+                .save("hdfs://path/to/api-stats/" + yesterday);
+
+            errorStats.write()
+                .mode(SaveMode.Overwrite)
+                .format("parquet")
+                .save("hdfs://path/to/error-stats/" + yesterday);
+
+            // 生成日报
+            generateDailyReport(apiStats, errorStats, yesterday);
+        }
+
+        private void generateDailyReport(Dataset<Row> apiStats, Dataset<Row> errorStats, String date) {
+            // 生成HTML报告
+            StringBuilder report = new StringBuilder();
+            report.append("<h1>日志分析报告 - ").append(date).append("</h1>");
+
+            // API统计部分
+            report.append("<h2>API调用统计</h2>");
+            report.append("<table border='1'>");
+            report.append("<tr><th>接口</th><th>调用次数</th><th>平均响应时间</th><th>P95响应时间</th></tr>");
+
+            apiStats.collectAsList().forEach(row -> {
+                report.append("<tr>")
+                    .append("<td>").append(row.getString(0)).append("</td>")
+                    .append("<td>").append(row.getLong(2)).append("</td>")
+                    .append("<td>").append(String.format("%.2f", row.getDouble(3))).append("ms</td>")
+                    .append("<td>").append(String.format("%.2f", row.getDouble(5))).append("ms</td>")
+                    .append("</tr>");
+            });
+            report.append("</table>");
+
+            // 错误统计部分
+            report.append("<h2>错误统计</h2>");
+            report.append("<table border='1'>");
+            report.append("<tr><th>服务</th><th>错误类型</th><th>错误次数</th></tr>");
+
+            errorStats.collectAsList().forEach(row -> {
+                report.append("<tr>")
+                    .append("<td>").append(row.getString(0)).append("</td>")
+                    .append("<td>").append(row.getString(1)).append("</td>")
+                    .append("<td>").append(row.getLong(2)).append("</td>")
+                    .append("</tr>");
+            });
+            report.append("</table>");
+
+            // 发送报告邮件
+            emailService.sendReport("daily-log-report@company.com",
+                "日志分析报告 - " + date, report.toString());
+        }
+    }
+}
+```
+
+## 13. 大数据项目实施的挑战和解决方案
+
+### 13.1 数据质量挑战
+
+#### 数据质量监控框架
+```java
+@Component
+public class DataQualityMonitor {
+
+    /**
+     * 数据质量检查规则
+     */
+    public class DataQualityRules {
+
+        // 完整性检查
+        public boolean checkCompleteness(Dataset<Row> dataset, List<String> requiredColumns) {
+            for (String column : requiredColumns) {
+                long nullCount = dataset.filter(col(column).isNull()).count();
+                double nullRate = (double) nullCount / dataset.count();
+
+                if (nullRate > 0.05) {  // 空值率超过5%
+                    log.warn("Column {} has high null rate: {}", column, nullRate);
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        // 一致性检查
+        public boolean checkConsistency(Dataset<Row> dataset) {
+            // 检查数据格式一致性
+            long invalidEmailCount = dataset
+                .filter(col("email").isNotNull())
+                .filter(!col("email").rlike("^[A-Za-z0-9+_.-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$"))
+                .count();
+
+            if (invalidEmailCount > 0) {
+                log.warn("Found {} invalid email addresses", invalidEmailCount);
+                return false;
+            }
+
+            // 检查数值范围
+            long invalidAgeCount = dataset
+                .filter(col("age").lt(0).or(col("age").gt(150)))
+                .count();
+
+            if (invalidAgeCount > 0) {
+                log.warn("Found {} invalid age values", invalidAgeCount);
+                return false;
+            }
+
+            return true;
+        }
+
+        // 及时性检查
+        public boolean checkTimeliness(Dataset<Row> dataset, String timestampColumn) {
+            Row latestRecord = dataset
+                .select(max(col(timestampColumn)).as("latest_timestamp"))
+                .first();
+
+            Timestamp latestTimestamp = latestRecord.getTimestamp(0);
+            long delayMinutes = (System.currentTimeMillis() - latestTimestamp.getTime()) / (1000 * 60);
+
+            if (delayMinutes > 60) {  // 数据延迟超过1小时
+                log.warn("Data is delayed by {} minutes", delayMinutes);
+                return false;
+            }
+
+            return true;
+        }
+    }
+
+    /**
+     * 数据质量修复
+     */
+    public class DataQualityRepair {
+
+        public Dataset<Row> repairData(Dataset<Row> dataset) {
+            // 填充空值
+            Dataset<Row> filledDataset = dataset
+                .na().fill("unknown", new String[]{"category"})
+                .na().fill(0, new String[]{"amount"})
+                .na().fill("1900-01-01", new String[]{"birth_date"});
+
+            // 数据标准化
+            Dataset<Row> standardizedDataset = filledDataset
+                .withColumn("email", lower(col("email")))
+                .withColumn("phone", regexp_replace(col("phone"), "[^0-9]", ""));
+
+            // 异常值处理
+            Dataset<Row> cleanedDataset = removeOutliers(standardizedDataset, "amount");
+
+            return cleanedDataset;
+        }
+
+        private Dataset<Row> removeOutliers(Dataset<Row> dataset, String column) {
+            // 使用IQR方法去除异常值
+            double q1 = dataset.stat().approxQuantile(column, new double[]{0.25}, 0.05)[0];
+            double q3 = dataset.stat().approxQuantile(column, new double[]{0.75}, 0.05)[0];
+            double iqr = q3 - q1;
+            double lowerBound = q1 - 1.5 * iqr;
+            double upperBound = q3 + 1.5 * iqr;
+
+            return dataset.filter(
+                col(column).geq(lowerBound).and(col(column).leq(upperBound))
+            );
+        }
+    }
+}
+```
+
+### 13.2 性能和扩展性挑战
+
+#### 自动扩缩容方案
+```java
+@Component
+public class AutoScalingManager {
+
+    /**
+     * 基于负载的自动扩缩容
+     */
+    public class LoadBasedAutoScaling {
+
+        @Scheduled(fixedDelay = 60000)  // 每分钟检查一次
+        public void checkAndScale() {
+            // 获取当前集群状态
+            ClusterMetrics metrics = getClusterMetrics();
+
+            // CPU使用率检查
+            if (metrics.getAvgCpuUsage() > 0.8) {
+                scaleOut("CPU usage too high: " + metrics.getAvgCpuUsage());
+            } else if (metrics.getAvgCpuUsage() < 0.3 && metrics.getNodeCount() > 3) {
+                scaleIn("CPU usage low: " + metrics.getAvgCpuUsage());
+            }
+
+            // 内存使用率检查
+            if (metrics.getAvgMemoryUsage() > 0.85) {
+                scaleOut("Memory usage too high: " + metrics.getAvgMemoryUsage());
+            }
+
+            // 队列长度检查
+            if (metrics.getQueueLength() > 1000) {
+                scaleOut("Queue length too high: " + metrics.getQueueLength());
+            }
+        }
+
+        private void scaleOut(String reason) {
+            log.info("Scaling out cluster. Reason: {}", reason);
+
+            // 增加Spark执行器
+            sparkContext.requestTotalExecutors(
+                sparkContext.getExecutorIds().size() + 2,
+                0,
+                Map.empty()
+            );
+
+            // 增加Kafka分区（如果需要）
+            if (shouldIncreaseKafkaPartitions()) {
+                increaseKafkaPartitions();
+            }
+        }
+
+        private void scaleIn(String reason) {
+            log.info("Scaling in cluster. Reason: {}", reason);
+
+            // 减少Spark执行器
+            List<String> executorIds = sparkContext.getExecutorIds();
+            if (executorIds.size() > 3) {
+                sparkContext.killExecutors(
+                    executorIds.subList(0, Math.min(2, executorIds.size() - 3))
+                );
+            }
+        }
+    }
+
+    /**
+     * 预测性扩缩容
+     */
+    public class PredictiveAutoScaling {
+
+        @Scheduled(cron = "0 */10 * * * ?")  // 每10分钟执行一次
+        public void predictiveScaling() {
+            // 获取历史负载数据
+            List<LoadMetric> historicalLoad = getHistoricalLoad(Duration.ofDays(7));
+
+            // 预测未来1小时的负载
+            LoadPrediction prediction = predictLoad(historicalLoad);
+
+            // 根据预测结果提前扩缩容
+            if (prediction.getPredictedLoad() > getCurrentCapacity() * 0.8) {
+                log.info("Predictive scaling out based on prediction: {}", prediction);
+                scaleOut("Predictive scaling - expected high load");
+            }
+        }
+
+        private LoadPrediction predictLoad(List<LoadMetric> historicalLoad) {
+            // 简单的时间序列预测（实际项目中可以使用更复杂的机器学习模型）
+
+            // 计算同一时间段的历史平均值
+            LocalTime currentTime = LocalTime.now();
+            double avgLoad = historicalLoad.stream()
+                .filter(metric -> isSimilarTime(metric.getTimestamp().toLocalTime(), currentTime))
+                .mapToDouble(LoadMetric::getLoad)
+                .average()
+                .orElse(0.0);
+
+            // 考虑趋势因子
+            double trendFactor = calculateTrendFactor(historicalLoad);
+
+            double predictedLoad = avgLoad * (1 + trendFactor);
+
+            return new LoadPrediction(predictedLoad, currentTime.plusHours(1));
+        }
+
+        private boolean isSimilarTime(LocalTime time1, LocalTime time2) {
+            return Math.abs(time1.toSecondOfDay() - time2.toSecondOfDay()) < 1800; // 30分钟内
+        }
+
+        private double calculateTrendFactor(List<LoadMetric> historicalLoad) {
+            if (historicalLoad.size() < 2) {
+                return 0.0;
+            }
+
+            // 计算最近一周的负载增长趋势
+            List<LoadMetric> recentLoad = historicalLoad.stream()
+                .filter(metric -> metric.getTimestamp().isAfter(LocalDateTime.now().minusDays(1)))
+                .sorted(Comparator.comparing(LoadMetric::getTimestamp))
+                .collect(Collectors.toList());
+
+            if (recentLoad.size() < 2) {
+                return 0.0;
+            }
+
+            double firstLoad = recentLoad.get(0).getLoad();
+            double lastLoad = recentLoad.get(recentLoad.size() - 1).getLoad();
+
+            return (lastLoad - firstLoad) / firstLoad;
+        }
+    }
+}
+```
+
+### 13.3 运维和监控挑战
+
+#### 全链路监控系统
+```java
+@Component
+public class ComprehensiveMonitoringSystem {
+
+    /**
+     * 应用性能监控
+     */
+    public class ApplicationPerformanceMonitoring {
+
+        @EventListener
+        public void onJobStart(JobStartEvent event) {
+            // 记录作业开始时间
+            meterRegistry.counter("job.started", "job_name", event.getJobName()).increment();
+
+            // 创建作业执行时间计时器
+            Timer.Sample sample = Timer.start(meterRegistry);
+            jobTimers.put(event.getJobId(), sample);
+        }
+
+        @EventListener
+        public void onJobComplete(JobCompleteEvent event) {
+            // 记录作业完成
+            meterRegistry.counter("job.completed",
+                "job_name", event.getJobName(),
+                "status", event.getStatus().toString()).increment();
+
+            // 停止计时器
+            Timer.Sample sample = jobTimers.remove(event.getJobId());
+            if (sample != null) {
+                sample.stop(Timer.builder("job.duration")
+                    .tag("job_name", event.getJobName())
+                    .register(meterRegistry));
+            }
+
+            // 记录处理的数据量
+            meterRegistry.gauge("job.records_processed",
+                Tags.of("job_name", event.getJobName()),
+                event.getRecordsProcessed());
+        }
+
+        @Scheduled(fixedDelay = 30000)  // 每30秒收集一次指标
+        public void collectMetrics() {
+            // 收集JVM指标
+            Runtime runtime = Runtime.getRuntime();
+            meterRegistry.gauge("jvm.memory.used", runtime.totalMemory() - runtime.freeMemory());
+            meterRegistry.gauge("jvm.memory.total", runtime.totalMemory());
+            meterRegistry.gauge("jvm.memory.max", runtime.maxMemory());
+
+            // 收集Spark指标
+            if (sparkContext != null) {
+                SparkStatusTracker statusTracker = sparkContext.statusTracker();
+                meterRegistry.gauge("spark.executors.active", statusTracker.getExecutorInfos().length);
+
+                for (SparkExecutorInfo executor : statusTracker.getExecutorInfos()) {
+                    meterRegistry.gauge("spark.executor.memory.used",
+                        Tags.of("executor_id", executor.executorId()),
+                        executor.memoryUsed());
+                }
+            }
+
+            // 收集Kafka指标
+            collectKafkaMetrics();
+        }
+
+        private void collectKafkaMetrics() {
+            // 收集Kafka消费者lag
+            Map<TopicPartition, Long> consumerLag = getConsumerLag();
+            consumerLag.forEach((tp, lag) -> {
+                meterRegistry.gauge("kafka.consumer.lag",
+                    Tags.of("topic", tp.topic(), "partition", String.valueOf(tp.partition())),
+                    lag);
+            });
+
+            // 收集Kafka生产者指标
+            meterRegistry.gauge("kafka.producer.record_send_rate", getProducerSendRate());
+        }
+    }
+
+    /**
+     * 异常监控和告警
+     */
+    public class ExceptionMonitoringAndAlerting {
+
+        @EventListener
+        public void onException(ExceptionEvent event) {
+            // 记录异常指标
+            meterRegistry.counter("exceptions.count",
+                "exception_type", event.getException().getClass().getSimpleName(),
+                "component", event.getComponent()).increment();
+
+            // 判断是否需要告警
+            if (shouldAlert(event)) {
+                sendAlert(event);
+            }
+        }
+
+        private boolean shouldAlert(ExceptionEvent event) {
+            String exceptionType = event.getException().getClass().getSimpleName();
+
+            // 获取最近5分钟内同类型异常的数量
+            long recentExceptionCount = getRecentExceptionCount(exceptionType, Duration.ofMinutes(5));
+
+            // 如果5分钟内同类型异常超过10次，则告警
+            if (recentExceptionCount > 10) {
+                return true;
+            }
+
+            // 对于严重异常，立即告警
+            if (isCriticalException(event.getException())) {
+                return true;
+            }
+
+            return false;
+        }
+
+        private void sendAlert(ExceptionEvent event) {
+            Alert alert = Alert.builder()
+                .title("大数据系统异常告警")
+                .message(String.format("组件: %s, 异常: %s, 消息: %s",
+                    event.getComponent(),
+                    event.getException().getClass().getSimpleName(),
+                    event.getException().getMessage()))
+                .severity(calculateSeverity(event))
+                .timestamp(LocalDateTime.now())
+                .build();
+
+            // 发送到多个渠道
+            alertService.sendEmail(alert);
+            alertService.sendSlack(alert);
+            alertService.sendSMS(alert);  // 仅对严重告警发送短信
+        }
+
+        private boolean isCriticalException(Exception exception) {
+            return exception instanceof OutOfMemoryError ||
+                   exception instanceof StackOverflowError ||
+                   exception instanceof NoClassDefFoundError ||
+                   exception.getMessage().contains("Connection refused") ||
+                   exception.getMessage().contains("Timeout");
+        }
+    }
+
+    /**
+     * 健康检查
+     */
+    public class HealthCheckService {
+
+        @Scheduled(fixedDelay = 60000)  // 每分钟检查一次
+        public void performHealthCheck() {
+            HealthCheckResult result = new HealthCheckResult();
+
+            // 检查Spark集群健康状态
+            result.setSparkHealth(checkSparkHealth());
+
+            // 检查Kafka集群健康状态
+            result.setKafkaHealth(checkKafkaHealth());
+
+            // 检查HDFS健康状态
+            result.setHdfsHealth(checkHdfsHealth());
+
+            // 检查数据库连接
+            result.setDatabaseHealth(checkDatabaseHealth());
+
+            // 更新健康状态指标
+            updateHealthMetrics(result);
+
+            // 如果有组件不健康，发送告警
+            if (!result.isOverallHealthy()) {
+                sendHealthAlert(result);
+            }
+        }
+
+        private HealthStatus checkSparkHealth() {
+            try {
+                if (sparkContext == null || sparkContext.isStopped()) {
+                    return HealthStatus.DOWN;
+                }
+
+                // 检查执行器状态
+                SparkExecutorInfo[] executors = sparkContext.statusTracker().getExecutorInfos();
+                long activeExecutors = Arrays.stream(executors)
+                    .filter(executor -> executor.isActive())
+                    .count();
+
+                if (activeExecutors == 0) {
+                    return HealthStatus.DOWN;
+                } else if (activeExecutors < executors.length * 0.8) {
+                    return HealthStatus.DEGRADED;
+                } else {
+                    return HealthStatus.UP;
+                }
+            } catch (Exception e) {
+                log.error("Error checking Spark health", e);
+                return HealthStatus.DOWN;
+            }
+        }
+
+        private HealthStatus checkKafkaHealth() {
+            try {
+                // 尝试获取Kafka集群元数据
+                Properties props = new Properties();
+                props.put("bootstrap.servers", kafkaBootstrapServers);
+                props.put("request.timeout.ms", "5000");
+
+                try (AdminClient adminClient = AdminClient.create(props)) {
+                    DescribeClusterResult clusterResult = adminClient.describeCluster();
+                    clusterResult.nodes().get(5, TimeUnit.SECONDS);
+                    return HealthStatus.UP;
+                }
+            } catch (Exception e) {
+                log.error("Error checking Kafka health", e);
+                return HealthStatus.DOWN;
+            }
+        }
+
+        private void updateHealthMetrics(HealthCheckResult result) {
+            meterRegistry.gauge("health.spark", result.getSparkHealth().ordinal());
+            meterRegistry.gauge("health.kafka", result.getKafkaHealth().ordinal());
+            meterRegistry.gauge("health.hdfs", result.getHdfsHealth().ordinal());
+            meterRegistry.gauge("health.database", result.getDatabaseHealth().ordinal());
+            meterRegistry.gauge("health.overall", result.isOverallHealthy() ? 1 : 0);
+        }
+    }
+}
+```
+
+---
+
+> 💡 **项目实施建议**：大数据项目的成功关键在于合理的架构设计、完善的监控体系、有效的数据质量管理和持续的性能优化。建议采用敏捷开发方式，先构建MVP（最小可行产品），然后逐步完善功能和性能。
+
+## 14. 项目实战案例
 
 ### 8.1 电商实时推荐系统
 
