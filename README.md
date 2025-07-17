@@ -36,7 +36,7 @@
 ## 🚀 快速开始
 
 ### 方式一：在线阅读
-- 📱 **手机端**：直接访问GitHub Pages网站
+- 📱 **手机端**：直接访问 [GitHub Pages网站](https://wsuo.github.io/java_interview/)
 - 💻 **电脑端**：克隆仓库到本地
 
 ### 方式二：本地部署
